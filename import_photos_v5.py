@@ -8,7 +8,8 @@ from PIL import Image
 import webbrowser
 
 # --- Логика скачивания ---
-def download_photos(excel_path, article_col, photo_cols, progress_callback, log_callback):
+def download_photos(excel_path, article_col, photo_cols, progress_callback, log_callback,
+                    article_suffix="", start_index=1, static_before="", static_after=""):
     try:
         df = pd.read_excel(excel_path, header=None)
     except Exception as e:
@@ -35,7 +36,7 @@ def download_photos(excel_path, article_col, photo_cols, progress_callback, log_
         folder = os.path.join(base_folder, article)
         os.makedirs(folder, exist_ok=True)
 
-        for i, col in enumerate(photo_cols, start=1):
+        for j, col in enumerate(photo_cols, start=start_index):
             if col >= len(row):
                 continue
             url = row[col]
@@ -43,7 +44,10 @@ def download_photos(excel_path, article_col, photo_cols, progress_callback, log_
                 try:
                     r = requests.get(url, timeout=10)
                     if r.status_code == 200:
-                        filename = os.path.join(folder, f"{article}_{i}.jpg")
+                        filename = os.path.join(
+                            folder,
+                            f"{article}{article_suffix}{static_before}_{static_after}{j}.jpg"
+                        )
                         with open(filename, "wb") as f:
                             f.write(r.content)
                         log_callback(f"✅ {filename}")
@@ -143,11 +147,21 @@ def start_download():
         return
 
     try:
-        article_col = int(entry_article_col.get())
-        photo_cols = [int(c.strip()) for c in entry_photo_cols.get().split(",")]
+        # Переводим в индексацию с нуля
+        article_col = int(entry_article_col.get()) - 1
+        photo_cols = [int(c.strip()) - 1 for c in entry_photo_cols.get().split(",")]
     except:
         messagebox.showerror("Ошибка", "Введите корректные номера колонок.")
         return
+
+    article_suffix = entry_article_suffix.get().strip()
+    try:
+        start_index = int(entry_start_index.get())
+    except:
+        start_index = 1
+
+    static_before = entry_static_before.get().strip()
+    static_after = entry_static_after.get().strip()
 
     text_log.delete(1.0, tk.END)
 
@@ -155,9 +169,11 @@ def start_download():
         total_files = len(excel_paths)
         for idx, path in enumerate(excel_paths, start=1):
             log_callback(f"📂 Обработка файла ({idx}/{total_files}): {path}")
-            download_photos(path, article_col, photo_cols, progress_callback, log_callback)
+            download_photos(path, article_col, photo_cols, progress_callback, log_callback,
+                            article_suffix, start_index, static_before, static_after)
 
     threading.Thread(target=run, daemon=True).start()
+
 
 def delete_files_of_format():
     folder_path = entry_convert_folder.get().strip()
@@ -169,11 +185,11 @@ def delete_files_of_format():
         messagebox.showerror("Ошибка", f"Папка не найдена: {folder_path}")
         return
 
-    # Подтверждение удаления
     if not messagebox.askyesno("Подтвердите", f"Удалить все файлы формата .{target_format} в папке?"):
         return
 
     threading.Thread(target=lambda: _delete_files_worker(folder_path, target_format), daemon=True).start()
+
 
 def _delete_files_worker(folder_path, target_format):
     deleted = 0
@@ -215,18 +231,19 @@ def open_link(url):
 
 # --- GUI Window ---
 root = tk.Tk()
-root.title("Photo Downloader & Converter v4.0")
-root.geometry("900x700")
-root.minsize(800, 600)
+root.title("Photo Downloader & Converter v5.0")
+root.geometry("950x750")
+root.minsize(850, 650)
 
 # Инструкция
 lbl_instr = tk.Label(root, text=(
     "Инструкция:\n"
     "1. Добавьте Excel-файлы с данными.\n"
-    "2. Укажите колонку с артикулами и колонки со ссылками.\n"
-    "3. Нажмите 'Начать скачивание' для сохранения фото.\n"
-    "4. В секции 'Конвертор' укажите папку с фото и формат для конвертации."
-), justify="left", wraplength=850, fg="blue")
+    "2. Укажите колонку с артикулами и колонки со ссылками (нумерация с 1).\n"
+    "3. Дополнительно настройте суффиксы и статичные значения для имен.\n"
+    "4. Нажмите 'Начать скачивание' для сохранения фото.\n"
+    "5. В секции 'Конвертор' укажите папку с фото и формат для конвертации."
+), justify="left", wraplength=900, fg="blue")
 lbl_instr.pack(pady=10)
 
 # Файлы Excel
@@ -239,20 +256,40 @@ btn_add = tk.Button(root, text="+ Добавить файл", command=add_file_e
 btn_add.pack(pady=5)
 
 # Настройки колонок
-frame_cols = tk.Frame(root)
-frame_cols.pack(pady=5, fill="x")
+frame_cols = tk.LabelFrame(root, text="Настройки колонок и имен файлов")
+frame_cols.pack(pady=5, fill="x", padx=5)
 frame_cols.columnconfigure(1, weight=1)
 frame_cols.columnconfigure(3, weight=1)
 
-tk.Label(frame_cols, text="Колонка с артикулами (номер):").grid(row=0, column=0, sticky="e")
+tk.Label(frame_cols, text="Колонка с артикулами:").grid(row=0, column=0, sticky="e")
 entry_article_col = tk.Entry(frame_cols, width=5)
 entry_article_col.insert(0, "1")
 entry_article_col.grid(row=0, column=1, padx=5, sticky="ew")
 
-tk.Label(frame_cols, text="Колонки со ссылками (через запятую):").grid(row=0, column=2, sticky="e")
+tk.Label(frame_cols, text="Колонки со ссылками:").grid(row=0, column=2, sticky="e")
 entry_photo_cols = tk.Entry(frame_cols, width=15)
 entry_photo_cols.insert(0, "2,3,4,5,6")
 entry_photo_cols.grid(row=0, column=3, padx=5, sticky="ew")
+
+tk.Label(frame_cols, text="Суффикс к артикулу:").grid(row=1, column=0, sticky="e")
+entry_article_suffix = tk.Entry(frame_cols, width=10)
+entry_article_suffix.insert(0, "")
+entry_article_suffix.grid(row=1, column=1, padx=5, sticky="ew")
+
+tk.Label(frame_cols, text="Начальное число фото:").grid(row=1, column=2, sticky="e")
+entry_start_index = tk.Entry(frame_cols, width=5)
+entry_start_index.insert(0, "1")
+entry_start_index.grid(row=1, column=3, padx=5, sticky="ew")
+
+tk.Label(frame_cols, text="Статичный текст ДО (_):").grid(row=2, column=0, sticky="e")
+entry_static_before = tk.Entry(frame_cols, width=10)
+entry_static_before.insert(0, "")
+entry_static_before.grid(row=2, column=1, padx=5, sticky="ew")
+
+tk.Label(frame_cols, text="Статичный текст ПОСЛЕ (_):").grid(row=2, column=2, sticky="e")
+entry_static_after = tk.Entry(frame_cols, width=10)
+entry_static_after.insert(0, "")
+entry_static_after.grid(row=2, column=3, padx=5, sticky="ew")
 
 # Кнопка скачивания
 btn_start = tk.Button(root, text="Начать скачивание", command=start_download, bg="green", fg="white")
@@ -305,3 +342,5 @@ lbl_right.grid(row=0, column=1, sticky="e")
 lbl_right.bind("<Button-1>", lambda e: open_link("https://github.com/ThreePerCento/Photo_downloader_from_links_to_Excel/releases"))
 
 root.mainloop()
+
+
