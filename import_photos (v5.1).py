@@ -7,6 +7,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from PIL import Image
 import webbrowser
 
+
 # --- Логика скачивания ---
 def download_photos(excel_path, article_col, photo_cols, progress_callback, log_callback,
                     article_suffix="", start_index=1, static_before="", static_after=""):
@@ -61,10 +62,10 @@ def download_photos(excel_path, article_col, photo_cols, progress_callback, log_
     log_callback(f"🎉 Готово для {excel_path}!")
 
 
-# --- Конвертор изображений ---
-def convert_images(folder_path, target_format, log_callback):
-    if not os.path.isdir(folder_path):
-        log_callback(f"❌ Папка не найдена: {folder_path}")
+# --- Конвертор изображений (рекурсивный) ---
+def convert_images_recursive(base_folder, target_format, log_callback, progress_callback):
+    if not os.path.isdir(base_folder):
+        log_callback(f"❌ Папка не найдена: {base_folder}")
         return
 
     supported_formats = ["PNG", "JPEG", "WEBP"]
@@ -75,24 +76,51 @@ def convert_images(folder_path, target_format, log_callback):
         log_callback(f"❌ Неподдерживаемый формат: {target_format}")
         return
 
-    files = os.listdir(folder_path)
-    converted = 0
+    images = []
+    for root, dirs, files in os.walk(base_folder):
+        for file in files:
+            if file.lower().endswith(("png", "jpg", "jpeg", "webp")):
+                images.append(os.path.join(root, file))
 
-    for file in files:
-        full_path = os.path.join(folder_path, file)
-        if not os.path.isfile(full_path):
-            continue
-        name, ext = os.path.splitext(file)
+    total = len(images)
+    done = 0
+
+    for full_path in images:
         try:
+            name, ext = os.path.splitext(os.path.basename(full_path))
             with Image.open(full_path) as img:
-                new_file = os.path.join(folder_path, f"{name}.{target_format.lower()}")
+                new_file = os.path.join(os.path.dirname(full_path), f"{name}.{target_format.lower()}")
                 img.convert("RGB").save(new_file, target_format_upper)
-                log_callback(f"✅ {file} → {new_file}")
-                converted += 1
+                log_callback(f"✅ {full_path} → {new_file}")
         except Exception as e:
-            log_callback(f"⚠️ {file} нельзя конвертировать: {e}")
+            log_callback(f"⚠️ {full_path} нельзя конвертировать: {e}")
+        done += 1
+        progress_callback(done, total)
 
-    log_callback(f"🎉 Конвертация завершена. Всего файлов конвертировано: {converted}")
+    log_callback(f"🎉 Конвертация завершена. Всего файлов конвертировано: {done}")
+
+
+# --- Удаление файлов ---
+def _delete_files_worker(folder_path, target_format, log_callback, progress_callback):
+    files_to_delete = []
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            if file.lower().endswith(f".{target_format.lower()}"):
+                files_to_delete.append(os.path.join(root, file))
+
+    total = len(files_to_delete)
+    done = 0
+
+    for file_path in files_to_delete:
+        try:
+            os.remove(file_path)
+            log_callback(f"🗑️ Удалено: {file_path}")
+        except Exception as e:
+            log_callback(f"❌ Не удалось удалить {file_path}: {e}")
+        done += 1
+        progress_callback(done, total)
+
+    log_callback(f"🎉 Удаление завершено. Всего удалено: {done} файлов.")
 
 
 # --- GUI ---
@@ -147,7 +175,6 @@ def start_download():
         return
 
     try:
-        # Переводим в индексацию с нуля
         article_col = int(entry_article_col.get()) - 1
         photo_cols = [int(c.strip()) - 1 for c in entry_photo_cols.get().split(",")]
     except:
@@ -184,24 +211,12 @@ def delete_files_of_format():
     if not os.path.isdir(folder_path):
         messagebox.showerror("Ошибка", f"Папка не найдена: {folder_path}")
         return
-
     if not messagebox.askyesno("Подтвердите", f"Удалить все файлы формата .{target_format} в папке?"):
         return
-
-    threading.Thread(target=lambda: _delete_files_worker(folder_path, target_format), daemon=True).start()
-
-
-def _delete_files_worker(folder_path, target_format):
-    deleted = 0
-    for file in os.listdir(folder_path):
-        if file.lower().endswith(f".{target_format.lower()}"):
-            try:
-                os.remove(os.path.join(folder_path, file))
-                log_callback(f"🗑️ Удалено: {file}")
-                deleted += 1
-            except Exception as e:
-                log_callback(f"❌ Не удалось удалить {file}: {e}")
-    log_callback(f"🎉 Удаление завершено. Всего удалено: {deleted} файлов.")    
+    threading.Thread(
+        target=lambda: _delete_files_worker(folder_path, target_format, log_callback, progress_callback),
+        daemon=True
+    ).start()
 
 
 def start_conversion():
@@ -210,7 +225,10 @@ def start_conversion():
     if not folder_path or not target_format:
         messagebox.showerror("Ошибка", "Укажите папку и формат для конвертации.")
         return
-    threading.Thread(target=lambda: convert_images(folder_path, target_format, log_callback), daemon=True).start()
+    threading.Thread(
+        target=lambda: convert_images_recursive(folder_path, target_format, log_callback, progress_callback),
+        daemon=True
+    ).start()
 
 
 def log_callback(msg):
@@ -219,7 +237,7 @@ def log_callback(msg):
 
 
 def progress_callback(done, total):
-    percent = int(done / total * 100)
+    percent = int(done / total * 100) if total else 0
     progress_bar["value"] = percent
     lbl_progress.config(text=f"{percent}% ({done}/{total})")
     root.update_idletasks()
@@ -231,7 +249,7 @@ def open_link(url):
 
 # --- GUI Window ---
 root = tk.Tk()
-root.title("Photo Downloader & Converter v5.0")
+root.title("Photo Downloader & Converter v6.0")
 root.geometry("950x750")
 root.minsize(850, 650)
 
@@ -242,7 +260,7 @@ lbl_instr = tk.Label(root, text=(
     "2. Укажите колонку с артикулами и колонки со ссылками (нумерация с 1).\n"
     "3. Дополнительно настройте суффиксы и статичные значения для имен.\n"
     "4. Нажмите 'Начать скачивание' для сохранения фото.\n"
-    "5. В секции 'Конвертор' укажите папку с фото и формат для конвертации."
+    "5. В секции 'Конвертор' укажите папку с фото и формат для конвертации/удаления."
 ), justify="left", wraplength=900, fg="blue")
 lbl_instr.pack(pady=10)
 
@@ -342,5 +360,6 @@ lbl_right.grid(row=0, column=1, sticky="e")
 lbl_right.bind("<Button-1>", lambda e: open_link("https://github.com/ThreePerCento/Photo_downloader_from_links_to_Excel/releases"))
 
 root.mainloop()
+
 
 
