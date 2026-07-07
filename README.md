@@ -13,3 +13,5 @@ V3 - Edited and improved program interface, including stretching capabilities, e
 V4 - Added the ability to bulk convert file formats. For example, from webp to jpg or png
 
 V5 - Added the ability to customize SKU suffixes and prefixes. For example, SKU1_1/2/3 or SKU_01/02/03
+
+V6 - 1. Added a random timeout between requests to bypass 403 blocking on some sites (e.g. VseInstrumenti). 2. Added functionality for grouping files from multiple folders into a single root folder.
